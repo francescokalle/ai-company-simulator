@@ -671,16 +671,6 @@ function OnboardingModal() {
                   placeholder="username-github"
                 />
               </div>
-              <div style={{ marginBottom: 8 }}>
-                <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>
-                  GitHub Personal Access Token (opzionale, per invio automatico)
-                </label>
-                <input
-                  type="password" value={githubToken} onChange={(e) => setGithubToken(e.target.value)}
-                  style={{ width: '100%', padding: 8, background: '#1e293b', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0' }}
-                  placeholder="ghp_..."
-                />
-              </div>
               <button
                 type="button" onClick={handleInvite} disabled={loading || !githubUrl.trim()}
                 style={{

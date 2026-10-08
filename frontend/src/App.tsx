@@ -50,7 +50,6 @@ const OPTIONAL_OFFICES = [
 
 
 function LoginScreen() {
-  const [isLogin, setIsLogin] = useState(true)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -72,8 +71,7 @@ function LoginScreen() {
       formData.append('username', username)
       formData.append('password', password)
 
-      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register'
-      const res = await fetch(endpoint, { method: 'POST', body: formData })
+      const res = await fetch('/api/auth/login', { method: 'POST', body: formData })
       const data = await res.json()
 
       if (data.success) {
@@ -101,7 +99,7 @@ function LoginScreen() {
           🏢 AI Virtual Company
         </h2>
         <p style={{ marginBottom: 24, color: '#64748b', textAlign: 'center', fontSize: 13 }}>
-          {isLogin ? 'Accedi al tuo account' : 'Crea un nuovo account'}
+          Accedi al tuo account
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -140,19 +138,9 @@ function LoginScreen() {
               opacity: loading ? 0.6 : 1,
             }}
           >
-            {loading ? 'Caricamento...' : (isLogin ? 'Accedi' : 'Crea Account')}
+            {loading ? 'Caricamento...' : 'Accedi'}
           </button>
         </form>
-
-        <div style={{ marginTop: 16, textAlign: 'center' }}>
-          <button
-            type="button"
-            onClick={() => { setIsLogin(!isLogin); setError('') }}
-            style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: 13 }}
-          >
-            {isLogin ? 'Non hai un account? Registrati' : 'Hai già un account? Accedi'}
-          </button>
-        </div>
       </div>
     </div>
   )

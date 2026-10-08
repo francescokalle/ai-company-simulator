@@ -82,16 +82,6 @@ def create_app(engine: CompanyEngine) -> FastAPI:
             return FileResponse(str(index_file))
         return {"message": "AI Virtual Company Simulator API", "status": "running"}
 
-    @app.post("/api/auth/register")
-    async def register(username: str = Form(...), password: str = Form(...)):
-        """Register a new user account."""
-        if len(password) < 8:
-            raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-        result = await auth_manager.register(username, password)
-        if not result["success"]:
-            raise HTTPException(status_code=409, detail=result["error"])
-        return {"success": True, "message": "Account created successfully"}
-
     @app.post("/api/auth/login")
     async def login(username: str = Form(...), password: str = Form(...)):
         """Authenticate and receive a session token."""

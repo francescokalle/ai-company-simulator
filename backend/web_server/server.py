@@ -221,7 +221,11 @@ def create_app(engine: CompanyEngine) -> FastAPI:
     async def websocket_endpoint(websocket: WebSocket, token: str = None):
         """WebSocket endpoint for real-time simulation events."""
         # Accept token via query param (WebSocket can't set headers easily)
-        if not token or token not in active_tokens:
+        if not token:
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+        user = await auth_manager.validate_token(token)
+        if not user:
             await websocket.close(code=4001, reason="Unauthorized")
             return
         await ws_manager.connect(websocket)

@@ -497,7 +497,7 @@ function OnboardingModal() {
   const [githubAppId, setGithubAppId] = useState('')
   const [githubPrivateKey, setGithubPrivateKey] = useState('')
   const [githubInstallationId, setGithubInstallationId] = useState('')
-  const [githubToken, setGithubToken] = useState('')
+  
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
   const [invited, setInvited] = useState(false)
   const [selectedDefault, setSelectedDefault] = useState<Set<string>>(new Set(DEFAULT_OFFICES.map(o => o.id)))

@@ -86,7 +86,7 @@ interface AppState {
 export const useStore = create<AppState>((set) => ({
   connected: false,
   ws: null,
-  token: null,
+  token: localStorage.getItem('auth_token'),
   companyState: null,
   showOnboarding: true,
   showAgentModal: false,
@@ -98,7 +98,14 @@ export const useStore = create<AppState>((set) => ({
 
   setConnected: (v) => set({ connected: v }),
   setWs: (ws) => set({ ws }),
-  setToken: (t) => set({ token: t }),
+  setToken: (t) => {
+    if (t) {
+      localStorage.setItem('auth_token', t);
+    } else {
+      localStorage.removeItem('auth_token');
+    }
+    set({ token: t });
+  },
   setCompanyState: (s) => set({ companyState: s }),
   setShowOnboarding: (v) => set({ showOnboarding: v }),
   setShowAgentModal: (v) => set({ showAgentModal: v }),

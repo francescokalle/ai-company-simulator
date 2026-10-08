@@ -971,7 +971,13 @@ function useWebSocket() {
     ws.onclose = () => {
       setConnected(false)
       setWs(null)
-      setTimeout(() => window.location.reload(), 3000)
+      // Reconnect after 5 seconds without reloading the page
+      setTimeout(() => {
+        const currentToken = useStore.getState().token
+        if (currentToken) {
+          useWebSocket()
+        }
+      }, 5000)
     }
 
     ws.onerror = () => {

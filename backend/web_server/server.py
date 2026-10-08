@@ -22,12 +22,27 @@ from auth import AuthManager
 logger = logging.getLogger(__name__)
 
 
+# Auth manager (module-level so lifespan can access it)
+auth_manager = AuthManager()
+
+
 def create_app(engine: CompanyEngine) -> FastAPI:
     """Create and configure the FastAPI application."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Startup
+        await auth_manager.initialize()
+        yield
+        # Shutdown
+        pass
+
     app = FastAPI(
         title="AI Virtual Company Simulator",
         description="Multi-agent virtual company simulation platform",
         version="1.0.0",
+        lifespan=lifespan,
     )
 
     # CORS
@@ -41,10 +56,6 @@ def create_app(engine: CompanyEngine) -> FastAPI:
 
     # WebSocket connection manager
     ws_manager = WebSocketManager(engine)
-
-    # Auth manager
-    auth_manager = AuthManager()
-    await auth_manager.initialize()
 
     def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
         if not credentials:

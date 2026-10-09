@@ -36,6 +36,28 @@ export interface CompanyState {
   agent_count: number
   max_agents: number
   running: boolean
+  paused?: boolean
+  company_id?: string | null
+  company_name?: string | null
+  progress?: {
+    phase: string
+    step: number
+    total_steps: number
+    percent: number
+    message: string
+    detail: string
+    error?: string | null
+    paused?: boolean
+  } | null
+}
+
+export interface CompanySummary {
+  id: string
+  name: string
+  source: string
+  status: string
+  created_at: string
+  updated_at: string
 }
 
 export interface WalkEvent {
@@ -59,28 +81,34 @@ interface AppState {
 
   // Company state
   companyState: CompanyState | null
+  companies: CompanySummary[]
 
   // UI State
   showOnboarding: boolean
   showAgentModal: boolean
+  showCompanyModal: boolean
   selectedAgentId: string | null
   selectedAgent: Agent | null
   agentChatLog: Array<{ timestamp: string; from?: string; to?: string; message: string; response?: string }>
   agentTaskQueue: Array<{ type: string; description: string }>
   githubInviteUrl: string | null
+  progress: CompanyState['progress'] | null
 
   // Actions
   setConnected: (v: boolean) => void
   setWs: (ws: WebSocket | null) => void
   setToken: (t: string | null) => void
   setCompanyState: (s: CompanyState) => void
+  setCompanies: (c: CompanySummary[]) => void
   setShowOnboarding: (v: boolean) => void
   setShowAgentModal: (v: boolean) => void
+  setShowCompanyModal: (v: boolean) => void
   setSelectedAgent: (id: string | null) => void
   setSelectedAgentData: (a: Agent | null) => void
   setAgentChatLog: (log: Array<any>) => void
   setAgentTaskQueue: (q: Array<any>) => void
   setGithubInviteUrl: (url: string | null) => void
+  setProgress: (p: CompanyState['progress'] | null) => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -88,13 +116,16 @@ export const useStore = create<AppState>((set) => ({
   ws: null,
   token: localStorage.getItem('auth_token'),
   companyState: null,
+  companies: [],
   showOnboarding: true,
   showAgentModal: false,
+  showCompanyModal: false,
   selectedAgentId: null,
   selectedAgent: null,
   agentChatLog: [],
   agentTaskQueue: [],
   githubInviteUrl: null,
+  progress: null,
 
   setConnected: (v) => set({ connected: v }),
   setWs: (ws) => set({ ws }),
@@ -106,12 +137,15 @@ export const useStore = create<AppState>((set) => ({
     }
     set({ token: t });
   },
-  setCompanyState: (s) => set({ companyState: s }),
+  setCompanyState: (s) => set({ companyState: s, progress: s.progress ?? null }),
+  setCompanies: (c) => set({ companies: c }),
   setShowOnboarding: (v) => set({ showOnboarding: v }),
   setShowAgentModal: (v) => set({ showAgentModal: v }),
+  setShowCompanyModal: (v) => set({ showCompanyModal: v }),
   setSelectedAgent: (id) => set({ selectedAgentId: id }),
   setSelectedAgentData: (a) => set({ selectedAgent: a }),
   setAgentChatLog: (log) => set({ agentChatLog: log }),
   setAgentTaskQueue: (q) => set({ agentTaskQueue: q }),
   setGithubInviteUrl: (url) => set({ githubInviteUrl: url }),
+  setProgress: (p) => set({ progress: p }),
 }))

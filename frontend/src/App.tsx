@@ -150,7 +150,44 @@ function App() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const appRef = useRef<Application | null>(null)
   const spritesRef = useRef<Map<string, AgentSprite>>(new Map())
-  const { companyState, ws, setCompanyState, setShowOnboarding, token, setToken } = useStore()
+  const { companyState, ws, setCompanyState, setShowOnboarding, setProgress, token, setToken } = useStore()
+
+  // Load the list of saved companies for this user
+  const loadCompanies = useCallback(async () => {
+    const token = useStore.getState().token
+    if (!token) return
+    try {
+      const res = await fetch('/api/companies', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (data.success) {
+        useStore.getState().setCompanies(data.companies || [])
+      }
+    } catch { /* ignore */ }
+  }, [])
+
+  // Company controls
+  const controlCompany = useCallback(async (action: 'pause' | 'resume' | 'stop') => {
+    const token = useStore.getState().token
+    if (!token) return
+    try {
+      await fetch(`/api/company/${action}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (action === 'stop') {
+        setCompanyState(null as any)
+        setProgress(null)
+        loadCompanies()
+      } else {
+        setCompanyState({
+          ...(useStore.getState().companyState as any),
+          paused: action === 'pause',
+        })
+      }
+    } catch { /* ignore */ }
+  }, [setCompanyState, setProgress, loadCompanies])
 
   useEffect(() => {
     if (!canvasRef.current) return
@@ -181,8 +218,23 @@ function App() {
         case 'state':
           setCompanyState(msg.data)
           break
+        case 'analysis_progress':
+          setProgress(msg.data)
+          break
         case 'company_created':
           setShowOnboarding(false)
+          loadCompanies()
+          break
+        case 'company_paused':
+          setCompanyState({ ...(useStore.getState().companyState as any), paused: true })
+          break
+        case 'company_resumed':
+          setCompanyState({ ...(useStore.getState().companyState as any), paused: false })
+          break
+        case 'company_stopped':
+          setCompanyState(null)
+          setProgress(null)
+          loadCompanies()
           break
         case 'agent_walking':
           handleAgentWalking(msg.data)
@@ -421,10 +473,235 @@ function App() {
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
       <div ref={canvasRef} style={{ width: '100%', height: '100%' }} />
+      <CompanyList />
       <HUD />
+      <ProgressBar />
+      <ControlBar />
       <OnboardingModal />
       <AgentModal />
       <MessageInput />
+    </div>
+  )
+}
+
+// ---------- Progress bar with step detail ----------
+function ProgressBar() {
+  const { progress } = useStore()
+  if (!progress || progress.phase === 'idle') return null
+
+  const pct = Math.max(0, Math.min(100, progress.percent || 0))
+  const isError = progress.phase === 'error'
+  const isDone = progress.phase === 'complete'
+  const isPaused = progress.phase === 'paused' || progress.paused
+
+  const barColor = isError ? '#ef4444' : isDone ? '#22c55e' : isPaused ? '#eab308' : '#3b82f6'
+
+  return (
+    <div style={{
+      position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)',
+      width: 520, maxWidth: '92vw', background: 'rgba(15,23,42,0.95)',
+      border: '1px solid #334155', borderRadius: 10, padding: 14, zIndex: 60,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 'bold' }}>
+          {isError ? '❌ Errore' : isDone ? '✅ Completato' : isPaused ? '⏸️ In pausa' : '⚙️ Creazione azienda'}
+        </span>
+        <span style={{ color: '#94a3b8', fontSize: 12 }}>
+          Step {progress.step}/{progress.total_steps} · {pct.toFixed(0)}%
+        </span>
+      </div>
+
+      {/* Track */}
+      <div style={{
+        height: 8, background: '#1e293b', borderRadius: 4, overflow: 'hidden',
+        border: '1px solid #334155',
+      }}>
+        <div style={{
+          width: `${pct}%`, height: '100%', background: barColor,
+          transition: 'width .3s ease',
+        }} />
+      </div>
+
+      <div style={{ marginTop: 8, color: '#cbd5e1', fontSize: 12 }}>{progress.message}</div>
+      {progress.detail && (
+        <div style={{ marginTop: 2, color: '#64748b', fontSize: 11, wordBreak: 'break-all' }}>
+          {progress.detail}
+        </div>
+      )}
+      {isError && progress.error && (
+        <div style={{ marginTop: 6, color: '#fca5a5', fontSize: 11 }}>{progress.error}</div>
+      )}
+    </div>
+  )
+}
+
+// ---------- Pause / Resume / Stop controls ----------
+function ControlBar() {
+  const { companyState } = useStore()
+  const [busy, setBusy] = useState(false)
+
+  // No company loaded: nothing to control
+  if (!companyState) return null
+
+  const isPaused = !!companyState.paused
+
+  const act = async (action: 'pause' | 'resume' | 'stop') => {
+    setBusy(true)
+    const t = useStore.getState().token
+    try {
+      await fetch(`/api/company/${action}`, {
+        method: 'POST',
+        headers: t ? { Authorization: `Bearer ${t}` } : {},
+      })
+      if (action === 'stop') {
+        useStore.getState().setCompanyState(null as any)
+        useStore.getState().setProgress(null)
+      } else {
+        useStore.getState().setCompanyState({ ...companyState, paused: action === 'pause' })
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const btn = (label: string, color: string, onClick: () => void, disabled = false) => (
+    <button
+      onClick={onClick}
+      disabled={busy || disabled}
+      style={{
+        padding: '8px 14px', background: color, border: 'none', borderRadius: 6,
+        color: '#fff', fontSize: 12, fontWeight: 'bold',
+        cursor: busy || disabled ? 'not-allowed' : 'pointer',
+        opacity: busy || disabled ? 0.5 : 1,
+      }}
+    >
+      {label}
+    </button>
+  )
+
+  return (
+    <div style={{
+      position: 'absolute', bottom: 20, right: 14, display: 'flex', gap: 8, zIndex: 55,
+    }}>
+      {isPaused
+        ? btn('▶ Riprendi', '#22c55e', () => act('resume'))
+        : btn('⏸ Pausa', '#eab308', () => act('pause'))}
+      {btn('⏹ Stop', '#ef4444', () => act('stop'))}
+    </div>
+  )
+}
+
+// ---------- Saved companies panel ----------
+function CompanyList() {
+  const { companies, setCompanies, setShowOnboarding, setProgress } = useStore()
+  const token = useStore.getState().token
+  const [open, setOpen] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  const refresh = async () => {
+    if (!token) return
+    const res = await fetch('/api/companies', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const data = await res.json()
+    if (data.success) setCompanies(data.companies || [])
+  }
+
+  useEffect(() => { refresh() }, [])
+
+  const openCompany = async (id: string) => {
+    if (!token) return
+    const res = await fetch(`/api/companies/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const data = await res.json()
+    if (data.success) {
+      setOpen(false)
+      setShowOnboarding(false)
+      setProgress(null)
+    }
+  }
+
+  const remove = async (id: string) => {
+    if (!token) return
+    await fetch(`/api/companies/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    refresh()
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          position: 'absolute', top: 10, left: 10, zIndex: 55,
+          padding: '8px 12px', background: 'rgba(30,41,59,0.92)',
+          border: '1px solid #334155', borderRadius: 8, color: '#e2e8f0',
+          fontSize: 12, cursor: 'pointer',
+        }}
+      >
+        🏢 Aziende ({companies.length})
+      </button>
+    )
+  }
+
+  return (
+    <div style={{
+      position: 'absolute', top: 10, left: 10, width: 320, maxHeight: '70vh',
+      overflowY: 'auto', background: 'rgba(30,41,59,0.97)',
+      border: '1px solid #334155', borderRadius: 10, padding: 14, zIndex: 55,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <strong style={{ color: '#e2e8f0', fontSize: 13 }}>Le tue aziende</strong>
+        <button onClick={() => setOpen(false)} style={{
+          background: 'none', border: 'none', color: '#94a3b8', fontSize: 18, cursor: 'pointer',
+        }}>×</button>
+      </div>
+
+      <button
+        onClick={() => { setOpen(false); setShowOnboarding(true) }}
+        style={{
+          width: '100%', padding: 8, marginBottom: 10, background: '#3b82f6',
+          border: 'none', borderRadius: 6, color: '#fff', fontSize: 12, cursor: 'pointer',
+        }}
+      >
+        + Nuova azienda
+      </button>
+
+      {companies.length === 0 && (
+        <div style={{ color: '#64748b', fontSize: 12 }}>Nessuna azienda salvata.</div>
+      )}
+
+      {companies.map((c) => (
+        <div key={c.id} style={{
+          background: '#0f172a', border: '1px solid #334155', borderRadius: 6,
+          padding: 10, marginBottom: 6,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 'bold' }}>{c.name}</span>
+            <span style={{
+              fontSize: 10, padding: '2px 6px', borderRadius: 4,
+              background: c.status === 'running' ? '#166534' : c.status === 'paused' ? '#854d0e' : '#7f1d1d',
+              color: '#fff',
+            }}>{c.status}</span>
+          </div>
+          <div style={{ color: '#64748b', fontSize: 10, marginTop: 2, wordBreak: 'break-all' }}>
+            {c.source}
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <button onClick={() => openCompany(c.id)} style={{
+              flex: 1, padding: 5, background: '#1e40af', border: 'none',
+              borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer',
+            }}>Apri</button>
+            <button onClick={() => remove(c.id)} style={{
+              padding: '5px 10px', background: '#7f1d1d', border: 'none',
+              borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer',
+            }}>Elimina</button>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -501,6 +778,8 @@ function OnboardingModal() {
   const [selectedDefault, setSelectedDefault] = useState<Set<string>>(new Set(DEFAULT_OFFICES.map(o => o.id)))
   const [selectedOptional, setSelectedOptional] = useState<Set<string>>(new Set())
   const [customOffices, setCustomOffices] = useState('')
+  const [modelChoice, setModelChoice] = useState('auto')
+  const [models, setModels] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [keyStatus, setKeyStatus] = useState<{ok: boolean; message: string} | null>(null)
@@ -560,7 +839,14 @@ function OnboardingModal() {
         }
         setSettingsLoaded(true)
       })
-      .catch(() => setSettingsLoaded(true))
+      .catch(() => {})
+      .finally(() => setSettingsLoaded(true))
+
+    // Model list for the dropdown
+    fetch('/api/models')
+      .then((r) => r.json())
+      .then((d) => { if (d.success) setModels(d.models || []) })
+      .catch(() => {})
   }, [settingsLoaded])
 
   if (!showOnboarding) return null
@@ -636,6 +922,7 @@ function OnboardingModal() {
     const formData = new FormData()
     formData.append('api_key', apiKey)
     formData.append('project_name', projectName)
+    formData.append('model_choice', modelChoice)
     formData.append('optional_offices', [
       ...Array.from(selectedOptional),
       ...customOffices.split(',').map(s => s.trim()).filter(Boolean)
@@ -809,6 +1096,29 @@ function OnboardingModal() {
           {/* Project Name + API Key */}
           <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
             <div style={{ flex: 1 }}>
+          {/* Modello di analisi */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>
+              Modello LLM (Opencode Zen)
+            </label>
+            <select
+              value={modelChoice}
+              onChange={(e) => setModelChoice(e.target.value)}
+              style={{
+                width: '100%', padding: 8, background: '#0f172a',
+                border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0',
+              }}
+            >
+              <option value="auto">🤖 Automatico (in base a dimensioni/complessità)</option>
+              {models.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            <div style={{ marginTop: 4, fontSize: 11, color: '#64748b' }}>
+              Con &quot;Automatico&quot; il sistema sceglie il modello più economico adatto al progetto.
+            </div>
+          </div>
+
               <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>Nome Progetto</label>
               <input
                 type="text" value={projectName} onChange={(e) => setProjectName(e.target.value)}

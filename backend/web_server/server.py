@@ -124,15 +124,15 @@ def create_app(engine: CompanyEngine) -> FastAPI:
         github_installation_id: str = Form(None),
         github_collaborator: str = Form(None),
         optional_offices: str = Form(""),
+        model_choice: str = Form("auto"),
         token: str = Depends(verify_token),
     ):
-        """Onboard a new project and create the virtual company."""
+        """Onboard a new project and create the virtual company (background job)."""
         try:
             # Determine project source
             if github_url:
                 project_source = github_url
             elif project_file:
-                # Save uploaded file
                 upload_dir = Path(__file__).parent.parent.parent / "data" / "uploads"
                 upload_dir.mkdir(parents=True, exist_ok=True)
                 file_path = upload_dir / project_file.filename
@@ -143,24 +143,32 @@ def create_app(engine: CompanyEngine) -> FastAPI:
             else:
                 raise HTTPException(status_code=400, detail="Either project_file or github_url must be provided")
 
-            # Parse optional offices
             offices = [o.strip() for o in optional_offices.split(",") if o.strip()]
 
-            # Onboard
-            result = await engine.onboard_project(
-                api_key=api_key,
-                project_source=project_source,
-                project_name=project_name,
-                optional_offices=offices,
-            )
+            # Resolve the user from the token so the company is scoped to them
+            user = await auth_manager.validate_token(token)
+            user_id = user["user_id"] if user else None
 
-            # Broadcast to all WebSocket clients
-            await ws_manager.broadcast({
-                "type": "company_created",
-                "data": result,
-            })
+            # Run onboarding as a background task so /api/company/stop can cancel it
+            async def _run():
+                return await engine.onboard_project(
+                    api_key=api_key,
+                    project_source=project_source,
+                    project_name=project_name,
+                    optional_offices=offices,
+                    model_choice=model_choice or "auto",
+                    user_id=user_id,
+                )
 
-            return result
+            engine._onboarding_task = asyncio.create_task(_run())
+
+            # Return immediately: progress is streamed over WebSocket/polling
+            return {
+                "started": True,
+                "message": "Creazione azienda avviata. Segui il progresso in tempo reale.",
+            }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Onboarding failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -269,6 +277,83 @@ def create_app(engine: CompanyEngine) -> FastAPI:
         except Exception as e:
             logger.error(f"GitHub setup check failed: {e}")
             return {"success": False, "error": str(e)}
+
+    # ---------- Company control ----------
+
+    @app.post("/api/company/pause")
+    async def pause_company(credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """Pause the running company (all agents stop working)."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        await engine.pause()
+        return {"success": True, "paused": True}
+
+    @app.post("/api/company/resume")
+    async def resume_company(credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """Resume a paused company."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        await engine.resume()
+        return {"success": True, "paused": False}
+
+    @app.post("/api/company/stop")
+    async def stop_company(credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """Stop the company: halt onboarding, stop all agents, clear state."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return await engine.stop_company()
+
+    @app.get("/api/company/progress")
+    async def get_progress(credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """Current onboarding progress (for polling)."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        if not engine.progress:
+            return {"phase": "idle"}
+        return engine.progress.get_state()
+
+    @app.get("/api/companies")
+    async def list_companies(credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """List all companies owned by the current user."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        companies = await engine.store.list_companies(user["user_id"])
+        return {"success": True, "companies": companies}
+
+    @app.get("/api/companies/{company_id}")
+    async def get_company(company_id: str, credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """Get one company and load it into the engine (switch)."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        company = await engine.store.get(company_id, user["user_id"])
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+        engine.current_company_id = company["id"]
+        engine.current_company_name = company["name"]
+        engine.current_user_id = user["user_id"]
+        return {"success": True, "company": company}
+
+    @app.delete("/api/companies/{company_id}")
+    async def delete_company(company_id: str, credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """Delete a company."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        deleted = await engine.store.delete(company_id, user["user_id"])
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Company not found")
+        return {"success": True}
+
+    @app.get("/api/models")
+    async def list_models():
+        """Available LLM models for the analysis dropdown."""
+        return {"success": True, "models": engine.model_selector.list_models()}
 
     @app.post("/api/llm/validate")
     async def validate_llm_key(request: dict, token: str = Depends(verify_token)):

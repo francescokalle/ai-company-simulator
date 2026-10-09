@@ -37,6 +37,7 @@ class BaseAgent(ABC):
         self.thoughts: str = ""
         self._task: Optional[asyncio.Task] = None
         self._running = False
+        self._aborted = False
         self._llm = None
         self.performance = {
             "tasks_completed": 0,
@@ -95,9 +96,17 @@ class BaseAgent(ABC):
         logger.info(f"Agent {self.name} ({self.agent_id}) stopped")
 
     async def _main_loop(self):
-        """Main agent loop."""
+        """Main agent loop. Honors pause/resume."""
         while self._running:
             try:
+                # Block while paused (engine-level pause)
+                if self.engine and getattr(self.engine, "is_paused", False):
+                    await asyncio.sleep(0.5)
+                    continue
+
+                if self._aborted:
+                    break
+
                 if self.task_queue:
                     task = self.task_queue.pop(0)
                     await self._execute_task(task)

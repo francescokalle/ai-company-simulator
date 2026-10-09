@@ -334,9 +334,9 @@ def create_app(engine: CompanyEngine) -> FastAPI:
         company = await engine.store.get(company_id, user["user_id"])
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
-        engine.current_company_id = company["id"]
-        engine.current_company_name = company["name"]
-        engine.current_user_id = user["user_id"]
+        engine.company_id = company["id"]
+        engine.project_name = company["name"]
+        engine.user_id = user["user_id"]
         return {"success": True, "company": company}
 
     @app.delete("/api/companies/{company_id}")

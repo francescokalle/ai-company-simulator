@@ -495,7 +495,6 @@ function OnboardingModal() {
   const [githubUrl, setGithubUrl] = useState('')
   const [githubAppId, setGithubAppId] = useState('')
   
-  const [githubInstallationId, setGithubInstallationId] = useState('')
   
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
   const [invited, setInvited] = useState(false)
@@ -503,6 +502,30 @@ function OnboardingModal() {
   const [selectedOptional, setSelectedOptional] = useState<Set<string>>(new Set())
   const [customOffices, setCustomOffices] = useState('')
   const [loading, setLoading] = useState(false)
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+
+  // Load saved settings when the modal opens
+  useEffect(() => {
+    const token = useStore.getState().token
+    if (!token || settingsLoaded) return
+
+    fetch('/api/settings', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && data.settings) {
+          const s = data.settings
+          if (s.opencode_api_key && s.opencode_api_key !== '***') setApiKey(s.opencode_api_key)
+          if (s.github_repo_url) setGithubUrl(s.github_repo_url)
+          if (s.github_app_id) setGithubAppId(s.github_app_id)
+          if (s.optional_offices?.length) setSelectedOptional(new Set(s.optional_offices))
+          if (s.custom_offices?.length) setCustomOffices(s.custom_offices.join(', '))
+        }
+        setSettingsLoaded(true)
+      })
+      .catch(() => setSettingsLoaded(true))
+  }, [settingsLoaded])
 
   if (!showOnboarding) return null
 
@@ -517,8 +540,8 @@ function OnboardingModal() {
   }
 
   const handleInvite = async () => {
-    if (!githubUrl.trim() || !githubAppId.trim() || !githubInstallationId.trim()) {
-      alert('Inserisci URL repository, App ID e Installation ID.')
+    if (!githubUrl.trim() || !githubAppId.trim()) {
+      alert('Inserisci URL repository e GitHub App ID.')
       return
     }
 
@@ -547,7 +570,6 @@ function OnboardingModal() {
         },
         body: JSON.stringify({
           app_id: githubAppId.trim(),
-          installation_id: githubInstallationId.trim(),
           owner,
           repo,
           collaborator,
@@ -584,17 +606,43 @@ function OnboardingModal() {
       ...customOffices.split(',').map(s => s.trim()).filter(Boolean)
     ].join(','))
 
-    if (sourceType === 'zip' && file) {
-      formData.append('project_file', file)
-    } else if (sourceType === 'github') {
-      formData.append('github_url', githubUrl)
-    }
-
     try {
-      const res = await fetch('/api/onboard', { method: 'POST', body: formData })
+      const token = useStore.getState().token
+
+      // Persist settings to the account so they're pre-filled next time
+      if (token) {
+        const settingsData = new FormData()
+        if (apiKey) settingsData.append('opencode_api_key', apiKey)
+        if (sourceType === 'github' && githubUrl) settingsData.append('github_repo_url', githubUrl)
+        if (sourceType === 'github' && githubAppId) settingsData.append('github_app_id', githubAppId)
+        settingsData.append('optional_offices', Array.from(selectedOptional).join(','))
+        settingsData.append('custom_offices', customOffices)
+        await fetch('/api/settings', {
+          method: 'POST',
+          body: settingsData,
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {}) // settings save must never block onboarding
+      }
+
+      // Send auth header with onboarding (endpoint is protected)
+      if (sourceType === 'zip' && file) {
+        formData.append('project_file', file)
+      } else if (sourceType === 'github') {
+        formData.append('github_url', githubUrl)
+      }
+
+      const res = await fetch('/api/onboard', {
+        method: 'POST',
+        body: formData,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       const data = await res.json()
       if (data.github_invite_url) {
         setGithubInviteUrl(data.github_invite_url)
+      }
+      if (data.error) {
+        alert(`Onboarding: ${data.detail || data.error}`)
+        return
       }
       setShowOnboarding(false)
     } catch (err) {
@@ -672,18 +720,8 @@ function OnboardingModal() {
                   placeholder="123456"
                 />
               </div>
-              <div style={{ marginBottom: 8 }}>
-                <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>
-                  Installation ID
-                </label>
-                <input
-                  type="text" value={githubInstallationId} onChange={(e) => setGithubInstallationId(e.target.value)}
-                  style={{ width: '100%', padding: 8, background: '#1e293b', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0' }}
-                  placeholder="12345678"
-                />
-              </div>
               <button
-                type="button" onClick={handleInvite} disabled={loading || !githubUrl.trim() || !githubAppId.trim() || !githubInstallationId.trim()}
+                type="button" onClick={handleInvite} disabled={loading || !githubUrl.trim() || !githubAppId.trim()}
                 style={{
                   width: '100%', padding: 8, background: '#238636', border: 'none',
                   borderRadius: 4, color: '#fff', cursor: 'pointer', fontSize: 12,

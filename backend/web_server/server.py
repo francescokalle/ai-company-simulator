@@ -167,16 +167,15 @@ def create_app(engine: CompanyEngine) -> FastAPI:
 
     @app.post("/api/github/invite")
     async def github_invite(request: dict, token: str = Depends(verify_token)):
-        """Invite a collaborator via GitHub App."""
+        """Invite the bot collaborator via GitHub App. Installation ID is auto-discovered."""
         try:
             app_id = request.get("app_id")
-            installation_id = request.get("installation_id")
             owner = request.get("owner")
             repo = request.get("repo")
-            collaborator = request.get("collaborator")
+            collaborator = request.get("collaborator", "the-agent-company")
 
-            if not all([app_id, installation_id, owner, repo, collaborator]):
-                raise HTTPException(status_code=400, detail="Missing required fields")
+            if not all([app_id, owner, repo]):
+                raise HTTPException(status_code=400, detail="Missing required fields: app_id, owner, repo")
 
             # Read private key from local file (never from request)
             key_path = Path(__file__).resolve().parent.parent.parent / ".secrets" / "github-app-private-key.pem"
@@ -186,11 +185,22 @@ def create_app(engine: CompanyEngine) -> FastAPI:
             private_key = key_path.read_text()
 
             gh_app = GitHubApp(app_id=str(app_id), private_key=private_key)
-            inst_token = await gh_app.get_installation_token(int(str(installation_id)))
+
+            # Auto-discover the installation that has access to this repo
+            installation = await gh_app.find_installation_for_repo(str(owner), str(repo))
+            if not installation:
+                return {
+                    "success": False,
+                    "error": "No GitHub App installation found with access to this repository. "
+                             "Install the App on the repo first: https://github.com/settings/installations",
+                }
+
+            inst_id = int(installation["id"])
+            inst_token = await gh_app.get_installation_token(inst_id)
             result = await gh_app.invite_collaborator(inst_token, str(owner), str(repo), str(collaborator))
 
             if result["success"]:
-                return {"success": True, "message": f"Invitation sent to {collaborator}"}
+                return {"success": True, "message": f"Invitation sent to {collaborator}", "installation_id": inst_id}
             else:
                 return {"success": False, "error": result.get("error", "Unknown error")}
         except HTTPException:
@@ -198,6 +208,41 @@ def create_app(engine: CompanyEngine) -> FastAPI:
         except Exception as e:
             logger.error(f"GitHub invite failed: {e}")
             return {"success": False, "error": str(e)}
+
+    @app.get("/api/settings")
+    async def get_settings(credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """Get saved settings for the current user."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        settings = await auth_manager.get_settings(user["user_id"])
+        # Never return the raw API key
+        settings["opencode_api_key"] = "***" if settings["opencode_api_key"] else ""
+        return {"success": True, "settings": settings}
+
+    @app.post("/api/settings")
+    async def save_settings(
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        opencode_api_key: str = Form(None),
+        github_repo_url: str = Form(None),
+        github_app_id: str = Form(None),
+        optional_offices: str = Form(None),
+        custom_offices: str = Form(None),
+    ):
+        """Save settings for the current user."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        result = await auth_manager.save_settings(
+            user_id=user["user_id"],
+            opencode_api_key=opencode_api_key,
+            github_repo_url=github_repo_url,
+            github_app_id=github_app_id,
+            optional_offices=[o.strip() for o in optional_offices.split(",") if o.strip()] if optional_offices is not None else None,
+            custom_offices=[o.strip() for o in custom_offices.split(",") if o.strip()] if custom_offices is not None else None,
+        )
+        return result
 
     @app.post("/api/message")
     async def send_message(

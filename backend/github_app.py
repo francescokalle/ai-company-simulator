@@ -72,6 +72,37 @@ class GitHubApp:
             resp.raise_for_status()
             return resp.json()
 
+    async def find_installation_for_repo(self, owner: str, repo: str) -> dict | None:
+        """
+        Find the installation that has access to a specific repo.
+        Returns {"id": ..., "account": ...} or None if not found.
+        """
+        installations = await self.get_installations()
+        for inst in installations:
+            inst_id = inst.get("id")
+            if inst_id is None:
+                continue
+            try:
+                token = await self.get_installation_token(int(inst_id))
+                url = f"https://api.github.com/repos/{owner}/{repo}"
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        url,
+                        headers={
+                            "Authorization": f"token {token}",
+                            "Accept": "application/vnd.github.v3+json",
+                        },
+                    )
+                    if resp.status_code == 200:
+                        return {
+                            "id": inst_id,
+                            "account": inst.get("account", {}).get("login", ""),
+                        }
+            except Exception as e:
+                logger.warning(f"Installation {inst_id} check failed: {e}")
+                continue
+        return None
+
     async def invite_collaborator(
         self,
         installation_token: str,

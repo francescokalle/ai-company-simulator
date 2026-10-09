@@ -37,12 +37,45 @@ class BaseAgent(ABC):
         self.thoughts: str = ""
         self._task: Optional[asyncio.Task] = None
         self._running = False
+        self._llm = None
         self.performance = {
             "tasks_completed": 0,
             "tasks_failed": 0,
             "avg_task_time": 0.0,
             "total_messages": 0,
         }
+
+    @property
+    def llm(self):
+        """Lazily create the LLM client (Opencode Zen)."""
+        if self._llm is None:
+            from llm_client import OpencodeClient
+            self._llm = OpencodeClient(api_key=self.api_key)
+        return self._llm
+
+    @property
+    def model_name(self) -> str:
+        return self.model_config.get("name", "claude-sonnet-4-5")
+
+    async def think(self, prompt: str, system: Optional[str] = None, max_tokens: int = 2048) -> str:
+        """
+        Ask the LLM for a response. This is the agent's actual 'brain'.
+        Falls back to a deterministic message only if the key is missing.
+        """
+        if not self.api_key:
+            return "[no-api-key] Configura la API key Opcode per abilitare il ragionamento."
+
+        try:
+            response = await self.llm.complete(
+                prompt=prompt,
+                model=self.model_name,
+                system=system,
+                max_tokens=max_tokens,
+            )
+            return response.strip()
+        except Exception as e:
+            logger.error(f"Agent {self.name} LLM call failed: {e}")
+            return f"[llm-error] {e}"
 
     async def start(self):
         """Start the agent's main loop."""

@@ -45,24 +45,32 @@ class OfficeManagerAgent(BaseAgent):
         ]
 
     async def _process_message(self, message: str, sender_id: str) -> str:
-        """Process messages from CEO or workers."""
-        self.thoughts = f"Received from {sender_id}: {message[:80]}..."
+        """Process messages from CEO or workers using real LLM reasoning."""
+        self.thoughts = f"Analizzo il messaggio da {sender_id}..."
 
+        system = (
+            f"Sei il manager dell'ufficio {self.office_name} in un'azienda virtuale di sviluppo software. "
+            "Ricevi istruzioni dal CEO e rispondi in italiano, in modo operativo e conciso. "
+            "Il tuo compito è scomporre il lavoro in task concreti per i tuoi worker."
+        )
+        prompt = (
+            f"Mittente: {sender_id}\n"
+            f"Messaggio:\n{message}\n\n"
+            "Rispondi come manager: conferma ricezione e indica come procederai. Max 3 frasi."
+        )
+
+        response = await self.think(prompt, system=system, max_tokens=512)
+        self.thoughts = response[:120]
+
+        # If the CEO gave an instruction, queue it as a task to break down
         if sender_id == "ceo":
-            # CEO instruction - queue as task
             self.task_queue.append({
                 "type": "delegate",
                 "description": message,
                 "from": sender_id,
             })
-            return f"Received instruction from CEO. Breaking down into tasks for {len(self.worker_ids)} workers."
 
-        # Worker update
-        if "completed" in message.lower():
-            self.performance["tasks_completed"] += 1
-            return "Great work! Keep it up."
-
-        return "Understood. Continue with your assigned tasks."
+        return response
 
     async def _idle_behavior(self):
         """Manager idle behavior."""

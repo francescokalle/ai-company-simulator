@@ -140,7 +140,7 @@ Limite hard-coded di **50 agenti attivi** per prevenire OOM. Quando il limite è
 Copia `.env.example` in `.env` e configura:
 
 ```env
-OPENROUTER_API_KEY=sk-or-your-key-here
+OPENCODE_API_KEY=your-opencode-zen-key-here
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password

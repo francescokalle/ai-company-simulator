@@ -33,17 +33,30 @@ class WorkerAgent(BaseAgent):
             await self.send_message(self.manager_id, f"Task completed: {description}")
 
     async def _process_message(self, message: str, sender_id: str) -> str:
-        """Process messages from manager."""
-        self.thoughts = f"Received task from {sender_id}: {message[:80]}..."
+        """Process messages from manager using real LLM reasoning."""
+        self.thoughts = f"Analizzo il task da {sender_id}..."
 
-        # Queue the task
+        system = (
+            f"Sei un worker specializzato in {self.specialization} "
+            "in un'azienda virtuale di sviluppo software. "
+            "Rispondi in italiano in modo tecnico e operativo. Max 4 frasi."
+        )
+        prompt = (
+            f"Task assegnato da {sender_id}:\n\n{message}\n\n"
+            "Descrivi come lo affronterai e quali sono i passi concreti."
+        )
+
+        response = await self.think(prompt, system=system, max_tokens=768)
+
+        # Queue the task for execution in the main loop
         self.task_queue.append({
             "type": "work",
             "description": message,
             "from": sender_id,
         })
 
-        return f"Task queued: {message[:60]}"
+        self.thoughts = response[:120]
+        return response
 
     async def _idle_behavior(self):
         """Worker idle behavior."""

@@ -270,6 +270,26 @@ def create_app(engine: CompanyEngine) -> FastAPI:
             logger.error(f"GitHub setup check failed: {e}")
             return {"success": False, "error": str(e)}
 
+    @app.post("/api/llm/validate")
+    async def validate_llm_key(request: dict, token: str = Depends(verify_token)):
+        """Validate an Opencode Zen API key with a real probe request."""
+        api_key = request.get("api_key", "")
+        if not api_key:
+            return {"success": False, "error": "API key mancante"}
+
+        try:
+            from llm_client import OpencodeClient
+            client = OpencodeClient(api_key=api_key)
+            result = await client.get_quota_info()
+            if result["valid"]:
+                return {
+                    "success": True,
+                    "message": result.get("error") or "Chiave Opencode valida e funzionante",
+                }
+            return {"success": False, "error": result.get("error") or "Chiave non valida"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     @app.post("/api/message")
     async def send_message(
         message: str = Form(...),

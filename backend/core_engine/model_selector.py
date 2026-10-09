@@ -9,27 +9,28 @@ logger = logging.getLogger(__name__)
 class ModelSelector:
     """Selects the most cost-effective models for each agent role."""
 
-    # Model tiers: (name, provider, cost_tier, capability_tier)
+    # Model tiers using real Opencode Zen model IDs.
+    # Higher tier = stronger reasoning (and higher cost).
     MODELS = {
         "ceo": {
-            "high": {"name": "claude-sonnet-4", "provider": "opencode-go"},
-            "medium": {"name": "gpt-4o", "provider": "opencode-go"},
-            "low": {"name": "gemini-2.0-flash", "provider": "opencode-go"},
+            "high": {"name": "claude-opus-4-5", "provider": "opencode-go"},
+            "medium": {"name": "claude-sonnet-4-5", "provider": "opencode-go"},
+            "low": {"name": "claude-haiku-4-5", "provider": "opencode-go"},
         },
         "manager": {
-            "high": {"name": "claude-sonnet-4", "provider": "opencode-go"},
-            "medium": {"name": "gpt-4o-mini", "provider": "opencode-go"},
-            "low": {"name": "gemini-2.0-flash", "provider": "opencode-go"},
+            "high": {"name": "claude-sonnet-4-5", "provider": "opencode-go"},
+            "medium": {"name": "gpt-5.1", "provider": "opencode-go"},
+            "low": {"name": "claude-haiku-4-5", "provider": "opencode-go"},
         },
         "worker": {
-            "high": {"name": "gpt-4o", "provider": "opencode-go"},
-            "medium": {"name": "gpt-4o-mini", "provider": "opencode-go"},
-            "low": {"name": "gemini-2.0-flash", "provider": "opencode-go"},
+            "high": {"name": "gpt-5.1-codex", "provider": "opencode-go"},
+            "medium": {"name": "gpt-5.1", "provider": "opencode-go"},
+            "low": {"name": "claude-haiku-4-5", "provider": "opencode-go"},
         },
         "efficiency": {
-            "high": {"name": "claude-sonnet-4", "provider": "opencode-go"},
-            "medium": {"name": "gpt-4o-mini", "provider": "opencode-go"},
-            "low": {"name": "gemini-2.0-flash", "provider": "opencode-go"},
+            "high": {"name": "claude-sonnet-4-5", "provider": "opencode-go"},
+            "medium": {"name": "gpt-5.1", "provider": "opencode-go"},
+            "low": {"name": "claude-haiku-4-5", "provider": "opencode-go"},
         },
     }
 

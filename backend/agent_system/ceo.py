@@ -93,18 +93,22 @@ class CEOAgent(BaseAgent):
             await self.send_message(manager_id, instruction)
 
     async def _process_message(self, message: str, sender_id: str) -> str:
-        """Process messages from managers or workers."""
-        self.thoughts = f"Received update from {sender_id}: {message[:80]}..."
+        """Process messages from managers or workers with real LLM reasoning."""
+        self.thoughts = f"Analizzo l'aggiornamento da {sender_id}..."
 
-        # If it's a status update, acknowledge
-        if "completed" in message.lower() or "done" in message.lower():
-            return f"Acknowledged. Good work on completing the task."
+        system = (
+            "Sei il CEO di un'azienda virtuale di sviluppo software. "
+            "Hai autonomia totale: prendi decisioni senza chiedere chiarimenti. "
+            "Rispondi in italiano, in modo conciso e direzionale. Max 3 frasi."
+        )
+        prompt = (
+            f"Aggiornamento ricevuto da {sender_id}:\n\n{message}\n\n"
+            "Rispondi come CEO: dai una direzione, approva, o correggi il tiro."
+        )
 
-        # If it's a question, try to answer autonomously
-        if "?" in message:
-            return f"Based on my analysis, proceed with your best judgment. You have full autonomy to decide."
-
-        return "Understood. Continue with your work."
+        response = await self.think(prompt, system=system, max_tokens=512)
+        self.thoughts = response[:120]
+        return response
 
     async def _idle_behavior(self):
         """CEO idle behavior - monitor company status."""

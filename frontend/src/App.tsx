@@ -817,7 +817,7 @@ function OnboardingModal() {
               />
             </div>
             <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>API Key (OpenRouter)</label>
+              <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>API Key (Opencode Zen)</label>
               <input
                 type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
                 style={{ width: '100%', padding: 8, background: '#0f172a', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0' }}

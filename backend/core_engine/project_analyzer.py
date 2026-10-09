@@ -75,11 +75,30 @@ class ProjectAnalyzer:
             with zipfile.ZipFile(source, "r") as zf:
                 self._safe_extract_zip(zf, dest)
             return Path(dest)
-        elif source.startswith("http") and ".git" in source:
+        elif source.startswith("http"):
             if not self._validate_git_url(source):
                 raise ValueError(f"Invalid or unsafe git URL: {source}")
+
+            # Try GitHub App auth first (needed for private repos)
+            clone_dir = Path(dest)
+            if "github.com" in source:
+                from github_app import GitHubApp
+                key_path = Path(__file__).resolve().parent.parent.parent / ".secrets" / "github-app-private-key.pem"
+                if key_path.exists():
+                    try:
+                        parts = source.replace(".git", "").rstrip("/").split("github.com/")[1].split("/")
+                        owner, repo = parts[0], parts[1]
+                        app_id = os.environ.get("GITHUB_APP_ID", "")
+                        gh_app = GitHubApp(app_id=app_id, private_key=key_path.read_text())
+                        await gh_app.clone_repo(owner, repo, clone_dir)
+                        logger.info(f"Cloned {owner}/{repo} via GitHub App")
+                        return clone_dir
+                    except Exception as e:
+                        logger.warning(f"GitHub App clone failed ({e}), falling back to public clone")
+
+            # Fallback: anonymous clone (public repos only)
             subprocess.run(
-                ["git", "clone", "--depth", "1", source, dest],
+                ["git", "clone", "--depth", "1", source, str(dest)],
                 check=True,
                 capture_output=True,
                 timeout=300,  # 5 minute timeout

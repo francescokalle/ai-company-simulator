@@ -503,6 +503,42 @@ function OnboardingModal() {
   const [customOffices, setCustomOffices] = useState('')
   const [loading, setLoading] = useState(false)
   const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const [keyStatus, setKeyStatus] = useState<{ok: boolean; message: string} | null>(null)
+
+  // Validate + upload the private key to the server (never kept in browser state)
+  const handlePrivateKeyUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+
+    const text = await f.text()
+    if (!text.includes('BEGIN RSA PRIVATE KEY') && !text.includes('PRIVATE KEY')) {
+      setKeyStatus({ ok: false, message: 'File non valido: manca l\'header PEM.' })
+      return
+    }
+
+    const token = useStore.getState().token
+    setKeyStatus({ ok: true, message: 'Caricamento...' })
+    try {
+      const fd = new FormData()
+      fd.append('private_key', text)
+      const res = await fetch('/api/github/upload-key', {
+        method: 'POST',
+        body: fd,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      const data = await res.json()
+      if (data.success) {
+        setKeyStatus({
+          ok: true,
+          message: `Chiave caricata e validata (RSA ${data.key_size} bit).`,
+        })
+      } else {
+        setKeyStatus({ ok: false, message: data.error || 'Chiave rifiutata.' })
+      }
+    } catch {
+      setKeyStatus({ ok: false, message: 'Errore di rete durante il caricamento.' })
+    }
+  }
 
   // Load saved settings when the modal opens
   useEffect(() => {
@@ -719,6 +755,23 @@ function OnboardingModal() {
                   style={{ width: '100%', padding: 8, background: '#1e293b', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0' }}
                   placeholder="123456"
                 />
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>
+                  GitHub App Private Key (.pem) — caricata sul server, non viene salvata nel browser
+                </label>
+                <input
+                  type="file" accept=".pem,.key" onChange={handlePrivateKeyUpload}
+                  style={{ width: '100%', color: '#94a3b8', fontSize: 12 }}
+                />
+                {keyStatus && (
+                  <div style={{
+                    marginTop: 4, fontSize: 11,
+                    color: keyStatus.ok ? '#4ade80' : '#f87171',
+                  }}>
+                    {keyStatus.message}
+                  </div>
+                )}
               </div>
               <button
                 type="button" onClick={handleInvite} disabled={loading || !githubUrl.trim() || !githubAppId.trim()}

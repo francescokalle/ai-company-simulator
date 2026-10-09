@@ -165,6 +165,56 @@ def create_app(engine: CompanyEngine) -> FastAPI:
             logger.error(f"Onboarding failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.post("/api/github/upload-key")
+    async def upload_private_key(
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        private_key: str = Form(...),
+    ):
+        """Validate and store the GitHub App private key on the server."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        # Validate the key BEFORE saving anything
+        if "PRIVATE KEY" not in private_key:
+            return {"success": False, "error": "Formato PEM non valido: header mancante."}
+
+        try:
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            key_obj = serialization.load_pem_private_key(
+                private_key.encode("utf-8"), password=None
+            )
+            if not isinstance(key_obj, rsa.RSAPrivateKey):
+                return {"success": False, "error": "La chiave deve essere di tipo RSA."}
+            key_size = key_obj.key_size
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Invalid private key uploaded: {e}")
+            return {
+                "success": False,
+                "error": "Chiave privata non valida o corrotta. Rigenera il .pem dal pannello GitHub App.",
+            }
+
+        # Only save a validated key
+        secrets_dir = Path(__file__).resolve().parent.parent.parent / ".secrets"
+        secrets_dir.mkdir(mode=0o700, exist_ok=True)
+        key_path = secrets_dir / "github-app-private-key.pem"
+
+        if not private_key.endswith("\n"):
+            private_key += "\n"
+
+        try:
+            key_path.write_text(private_key)
+            key_path.chmod(0o600)
+        except Exception as e:
+            logger.error(f"Failed to save private key: {e}")
+            return {"success": False, "error": "Impossibile salvare la chiave sul server."}
+
+        logger.info(f"GitHub App private key updated (RSA {key_size} bit)")
+        return {"success": True, "key_size": key_size, "message": f"Chiave RSA {key_size} bit validata e salvata."}
+
     @app.post("/api/github/invite")
     async def github_invite(request: dict, token: str = Depends(verify_token)):
         """Invite the bot collaborator via GitHub App. Installation ID is auto-discovered."""

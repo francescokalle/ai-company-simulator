@@ -215,84 +215,60 @@ def create_app(engine: CompanyEngine) -> FastAPI:
         logger.info(f"GitHub App private key updated (RSA {key_size} bit)")
         return {"success": True, "key_size": key_size, "message": f"Chiave RSA {key_size} bit validata e salvata."}
 
-    @app.post("/api/github/invite")
-    async def github_invite(request: dict, token: str = Depends(verify_token)):
-        """Invite the bot collaborator via GitHub App. Installation ID is auto-discovered."""
+    @app.post("/api/github/setup")
+    async def github_setup(request: dict, token: str = Depends(verify_token)):
+        """
+        Verify the GitHub App can access a repo and return the install URL if not.
+        A GitHub App is not a user, so it cannot be invited as a collaborator:
+        it must be installed on the repository.
+        """
         try:
             app_id = request.get("app_id")
             owner = request.get("owner")
             repo = request.get("repo")
-            collaborator = request.get("collaborator", "the-agent-company")
 
             if not all([app_id, owner, repo]):
                 raise HTTPException(status_code=400, detail="Missing required fields: app_id, owner, repo")
 
-            # Read private key from local file (never from request)
             key_path = Path(__file__).resolve().parent.parent.parent / ".secrets" / "github-app-private-key.pem"
             if not key_path.exists():
-                return {"success": False, "error": "GitHub App private key not configured on server"}
-
-            private_key = key_path.read_text()
-
-            gh_app = GitHubApp(app_id=str(app_id), private_key=private_key)
-
-            # Auto-discover the installation that has access to this repo
-            installation = await gh_app.find_installation_for_repo(str(owner), str(repo))
-            if not installation:
                 return {
                     "success": False,
-                    "error": "No GitHub App installation found with access to this repository. "
-                             "Install the App on the repo first: https://github.com/settings/installations",
+                    "error": "Chiave privata non ancora caricata. Carica il file .pem della GitHub App.",
                 }
 
-            inst_id = int(installation["id"])
-            inst_token = await gh_app.get_installation_token(inst_id)
-            result = await gh_app.invite_collaborator(inst_token, str(owner), str(repo), str(collaborator))
+            gh_app = GitHubApp(app_id=str(app_id), private_key=key_path.read_text())
+            status = await gh_app.check_installation(str(owner), str(repo))
 
-            if result["success"]:
-                return {"success": True, "message": f"Invitation sent to {collaborator}", "installation_id": inst_id}
-            else:
-                return {"success": False, "error": result.get("error", "Unknown error")}
+            if not status.get("installed"):
+                return {
+                    "success": False,
+                    "installed": False,
+                    "error": status.get("error"),
+                    "install_url": status.get("install_url"),
+                }
+
+            if status.get("missing_permissions"):
+                return {
+                    "success": False,
+                    "installed": True,
+                    "error": "Permessi mancanti: " + ", ".join(status["missing_permissions"]),
+                    "missing_permissions": status["missing_permissions"],
+                    "install_url": status.get("install_url"),
+                }
+
+            return {
+                "success": True,
+                "installed": True,
+                "message": f"App installata e funzionante su {owner}/{repo}",
+                "permissions": status.get("permissions"),
+                "installation_id": status.get("installation_id"),
+            }
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"GitHub invite failed: {e}")
+            logger.error(f"GitHub setup check failed: {e}")
             return {"success": False, "error": str(e)}
-
-    @app.get("/api/settings")
-    async def get_settings(credentials: HTTPAuthorizationCredentials = Depends(security)):
-        """Get saved settings for the current user."""
-        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        settings = await auth_manager.get_settings(user["user_id"])
-        # Never return the raw API key
-        settings["opencode_api_key"] = "***" if settings["opencode_api_key"] else ""
-        return {"success": True, "settings": settings}
-
-    @app.post("/api/settings")
-    async def save_settings(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
-        opencode_api_key: str = Form(None),
-        github_repo_url: str = Form(None),
-        github_app_id: str = Form(None),
-        optional_offices: str = Form(None),
-        custom_offices: str = Form(None),
-    ):
-        """Save settings for the current user."""
-        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid token")
-
-        result = await auth_manager.save_settings(
-            user_id=user["user_id"],
-            opencode_api_key=opencode_api_key,
-            github_repo_url=github_repo_url,
-            github_app_id=github_app_id,
-            optional_offices=[o.strip() for o in optional_offices.split(",") if o.strip()] if optional_offices is not None else None,
-            custom_offices=[o.strip() for o in custom_offices.split(",") if o.strip()] if custom_offices is not None else None,
-        )
-        return result
 
     @app.post("/api/message")
     async def send_message(

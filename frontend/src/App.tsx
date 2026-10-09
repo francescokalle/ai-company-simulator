@@ -575,7 +575,7 @@ function OnboardingModal() {
     setList(next)
   }
 
-  const handleInvite = async () => {
+  const handleGitHubSetup = async () => {
     if (!githubUrl.trim() || !githubAppId.trim()) {
       alert('Inserisci URL repository e GitHub App ID.')
       return
@@ -592,13 +592,11 @@ function OnboardingModal() {
       }
 
       const [, owner, repo] = match
-      // The bot always uses its dedicated GitHub identity
-      const collaborator = 'the-agent-company'
-      const collabUrl = `https://github.com/${owner}/${repo}/collaborators/${collaborator}`
 
-      // Use backend GitHub App endpoint (private key stays server-side)
+      // A GitHub App is not a user: it must be INSTALLED on the repo,
+      // not invited as a collaborator. This endpoint verifies the install.
       const token = useStore.getState().token
-      const res = await fetch('/api/github/invite', {
+      const res = await fetch('/api/github/setup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -608,17 +606,18 @@ function OnboardingModal() {
           app_id: githubAppId.trim(),
           owner,
           repo,
-          collaborator,
         }),
       })
       const result = await res.json()
       if (result.success) {
         setInvited(true)
-        setInviteUrl(`https://github.com/${owner}/${repo}/invitations`)
-        alert(`Invito inviato a ${collaborator}!`)
+        setInviteUrl(null)
+        alert(`✅ App installata e funzionante su ${owner}/${repo}`)
       } else {
-        alert(`Invio fallito: ${result.error || 'Errore sconosciuto'}. Completa l'invito manualmente al link qui sotto.`)
-        setInviteUrl(collabUrl)
+        setInvited(false)
+        alert(result.error || 'Verifica fallita.')
+        // When not installed yet, show the one-click install link
+        setInviteUrl(result.install_url || null)
       }
     } catch (err) {
       alert('Errore: ' + err)
@@ -774,19 +773,19 @@ function OnboardingModal() {
                 )}
               </div>
               <button
-                type="button" onClick={handleInvite} disabled={loading || !githubUrl.trim() || !githubAppId.trim()}
+                type="button" onClick={handleGitHubSetup} disabled={loading || !githubUrl.trim() || !githubAppId.trim()}
                 style={{
                   width: '100%', padding: 8, background: '#238636', border: 'none',
                   borderRadius: 4, color: '#fff', cursor: 'pointer', fontSize: 12,
                   marginBottom: 8,
                 }}
               >
-                {loading ? 'Invio in corso...' : '🔗 Invita the-agent-company'}
+                {loading ? 'Verifica in corso...' : '🔗 Verifica installazione GitHub App'}
               </button>
               {inviteUrl && (
                 <div style={{ padding: 8, background: '#1a365d', borderRadius: 4, fontSize: 11 }}>
                   <div style={{ color: '#94a3b8', marginBottom: 4 }}>
-                    {invited ? '✅ Invito inviato!' : '⚠️ Completa l\'invito manualmente:'}
+                    {invited ? '✅ App installata e funzionante' : '⚠️ Installa la GitHub App sulla repository (un click):'}
                   </div>
                   <a href={inviteUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa' }}>
                     {inviteUrl}

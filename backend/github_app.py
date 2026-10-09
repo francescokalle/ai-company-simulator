@@ -183,6 +183,88 @@ class GitHubApp:
 
     # ---------- Collaborators ----------
 
+    async def get_app_info(self) -> dict:
+        """Get the App's own metadata (name, slug, owner) using the JWT."""
+        jwt_token = self._get_jwt()
+        url = "https://api.github.com/app"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {jwt_token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": API_VERSION,
+                },
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_install_url(self, owner: str, repo: str) -> str:
+        """
+        Build the URL where the user installs the App on their repo.
+        GitHub Apps are NOT users: they cannot be invited as collaborators.
+        They must be installed, which requires one click by the user.
+        """
+        try:
+            info = await self.get_app_info()
+            slug = info.get("slug", "")
+            if slug:
+                return f"https://github.com/apps/{slug}/installations/new?repository={owner}/{repo}"
+        except Exception as e:
+            logger.warning(f"Could not resolve app slug: {e}")
+        return f"https://github.com/settings/installations"
+
+    async def check_installation(self, owner: str, repo: str) -> dict:
+        """
+        Verify whether the App is installed and can access the repo.
+        Returns status, install URL, and permissions info.
+        """
+        try:
+            inst = await self.get_repo_installation(owner, repo)
+        except Exception as e:
+            return {
+                "installed": False,
+                "error": f"Impossibile verificare l'installazione: {e}",
+                "install_url": await self.get_install_url(owner, repo),
+            }
+
+        if not inst:
+            return {
+                "installed": False,
+                "error": "La GitHub App non è installata su questa repository.",
+                "install_url": await self.get_install_url(owner, repo),
+            }
+
+        # Verify the installation token actually grants repo access
+        try:
+            token = await self.get_installation_token(int(inst["id"]))
+        except Exception as e:
+            return {
+                "installed": False,
+                "error": f"Installazione trovata ma token non ottenibile: {e}",
+                "install_url": await self.get_install_url(owner, repo),
+            }
+
+        # Check what permissions the installation has
+        perms = inst.get("permissions", {})
+        contents_perm = perms.get("contents", "none")
+        admin_perm = perms.get("administration", "none")
+
+        missing = []
+        if contents_perm not in ("read", "write"):
+            missing.append("Contents: Read")
+        if admin_perm not in ("read", "write"):
+            missing.append("Administration: Read and write")
+
+        return {
+            "installed": True,
+            "installation_id": inst["id"],
+            "account": inst.get("account", {}).get("login", ""),
+            "permissions": {"contents": contents_perm, "administration": admin_perm},
+            "missing_permissions": missing,
+            "token_ok": bool(token),
+        }
+
     async def invite_collaborator(
         self,
         installation_token: str,

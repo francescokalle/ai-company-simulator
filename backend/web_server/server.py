@@ -355,6 +355,44 @@ def create_app(engine: CompanyEngine) -> FastAPI:
         """Available LLM models for the analysis dropdown."""
         return {"success": True, "models": engine.model_selector.list_models()}
 
+    @app.get("/api/settings")
+    async def get_settings(credentials: HTTPAuthorizationCredentials = Depends(security)):
+        """Get saved settings for the current user (API key is masked)."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        settings = await auth_manager.get_settings(user["user_id"])
+        # Never return the raw API key to the client
+        settings["opencode_api_key"] = "***" if settings["opencode_api_key"] else ""
+        return {"success": True, "settings": settings}
+
+    @app.post("/api/settings")
+    async def save_settings(
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        opencode_api_key: str = Form(None),
+        github_repo_url: str = Form(None),
+        github_app_id: str = Form(None),
+        optional_offices: str = Form(None),
+        custom_offices: str = Form(None),
+    ):
+        """Save settings for the current user (partial upsert)."""
+        user = await auth_manager.validate_token(credentials.credentials) if credentials else None
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        result = await auth_manager.save_settings(
+            user_id=user["user_id"],
+            opencode_api_key=opencode_api_key,
+            github_repo_url=github_repo_url,
+            github_app_id=github_app_id,
+            optional_offices=[o.strip() for o in optional_offices.split(",") if o.strip()] if optional_offices is not None else None,
+            custom_offices=[o.strip() for o in custom_offices.split(",") if o.strip()] if custom_offices is not None else None,
+        )
+        # Mask the key in the response
+        if result.get("settings", {}).get("opencode_api_key"):
+            result["settings"]["opencode_api_key"] = "***"
+        return result
+
     @app.post("/api/llm/validate")
     async def validate_llm_key(request: dict, token: str = Depends(verify_token)):
         """Validate an Opencode Zen API key with a real probe request."""

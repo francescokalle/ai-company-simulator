@@ -493,9 +493,8 @@ function OnboardingModal() {
   const [projectName, setProjectName] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [githubUrl, setGithubUrl] = useState('')
-  const [githubCollaborator, setGithubCollaborator] = useState('')
   const [githubAppId, setGithubAppId] = useState('')
-  const [githubPrivateKey, setGithubPrivateKey] = useState('')
+  
   const [githubInstallationId, setGithubInstallationId] = useState('')
   
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
@@ -518,35 +517,37 @@ function OnboardingModal() {
   }
 
   const handleInvite = async () => {
-    if (!githubUrl.trim()) return
+    if (!githubUrl.trim() || !githubAppId.trim() || !githubInstallationId.trim()) {
+      alert('Inserisci URL repository, App ID e Installation ID.')
+      return
+    }
 
     setLoading(true)
     try {
       // Extract owner/repo from URL
       const match = githubUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/)
       if (!match) {
-        alert('Invalid GitHub URL. Use format: https://github.com/owner/repo')
+        alert('URL GitHub non valido. Usa il formato: https://github.com/owner/repo')
         setLoading(false)
         return
       }
 
       const [, owner, repo] = match
-      const collaborator = githubCollaborator.trim()
-      if (!collaborator) {
-        alert('Inserisci il nome utente GitHub del collaboratore da invitare.')
-        return
-      }
-
+      // The bot always uses its dedicated GitHub identity
+      const collaborator = 'the-agent-company'
       const collabUrl = `https://github.com/${owner}/${repo}/collaborators/${collaborator}`
 
-      // Use backend GitHub App endpoint
+      // Use backend GitHub App endpoint (private key stays server-side)
+      const token = useStore.getState().token
       const res = await fetch('/api/github/invite', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
-          app_id: githubAppId,
-          private_key: githubPrivateKey,
-          installation_id: githubInstallationId,
+          app_id: githubAppId.trim(),
+          installation_id: githubInstallationId.trim(),
           owner,
           repo,
           collaborator,
@@ -562,7 +563,7 @@ function OnboardingModal() {
         setInviteUrl(collabUrl)
       }
     } catch (err) {
-      alert('Error: ' + err)
+      alert('Errore: ' + err)
     } finally {
       setLoading(false)
     }
@@ -663,23 +664,33 @@ function OnboardingModal() {
               </div>
               <div style={{ marginBottom: 8 }}>
                 <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>
-                  Nome utente GitHub del collaboratore
+                  GitHub App ID
                 </label>
                 <input
-                  type="text" value={githubCollaborator} onChange={(e) => setGithubCollaborator(e.target.value)}
+                  type="text" value={githubAppId} onChange={(e) => setGithubAppId(e.target.value)}
                   style={{ width: '100%', padding: 8, background: '#1e293b', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0' }}
-                  placeholder="username-github"
+                  placeholder="123456"
+                />
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>
+                  Installation ID
+                </label>
+                <input
+                  type="text" value={githubInstallationId} onChange={(e) => setGithubInstallationId(e.target.value)}
+                  style={{ width: '100%', padding: 8, background: '#1e293b', border: '1px solid #334155', borderRadius: 4, color: '#e2e8f0' }}
+                  placeholder="12345678"
                 />
               </div>
               <button
-                type="button" onClick={handleInvite} disabled={loading || !githubUrl.trim()}
+                type="button" onClick={handleInvite} disabled={loading || !githubUrl.trim() || !githubAppId.trim() || !githubInstallationId.trim()}
                 style={{
                   width: '100%', padding: 8, background: '#238636', border: 'none',
                   borderRadius: 4, color: '#fff', cursor: 'pointer', fontSize: 12,
                   marginBottom: 8,
                 }}
               >
-                {loading ? 'Invio in corso...' : '🔗 Invita collaboratore'}
+                {loading ? 'Invio in corso...' : '🔗 Invita the-agent-company'}
               </button>
               {inviteUrl && (
                 <div style={{ padding: 8, background: '#1a365d', borderRadius: 4, fontSize: 11 }}>

@@ -129,6 +129,20 @@ class CompanyEngine:
             optional_offices=optional_offices or [],
         )
 
+        # Enforce agent cap - prevent exceeding MAX_AGENTS
+        if len(self.agents) > self.MAX_AGENTS:
+            logger.warning(
+                f"Agent cap exceeded: {len(self.agents)}/{self.MAX_AGENTS}. "
+                f"Stopping agent startup."
+            )
+            self._running = False
+            return {
+                "error": "agent_cap_exceeded",
+                "detail": f"Project would create {len(self.agents)} agents, exceeding the {self.MAX_AGENTS} limit.",
+                "agent_count": len(self.agents),
+                "max_agents": self.MAX_AGENTS,
+            }
+
         # 6. Spawn CEO
         ceo = CEOAgent(
             agent_id="ceo",

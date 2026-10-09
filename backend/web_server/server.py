@@ -58,14 +58,23 @@ def create_app(engine: CompanyEngine) -> FastAPI:
     ws_manager = WebSocketManager(engine)
 
     def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-        if not credentials:
+        """Dependency: validate the bearer token synchronously (SQLite is fast)."""
+        if not credentials or not credentials.credentials:
             raise HTTPException(status_code=401, detail="Missing token")
-        # Validate via auth manager
-        import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
-            auth_manager.validate_token(credentials.credentials)
-        )
-        if not result:
+        # SQLite validation is a fast local read; run it directly
+        import sqlite3
+        try:
+            conn = sqlite3.connect(str(auth_manager.db_path.resolve()))
+            cursor = conn.execute(
+                "SELECT s.token FROM sessions s WHERE s.token = ? AND s.expires_at > datetime('now')",
+                (credentials.credentials,),
+            )
+            row = cursor.fetchone()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Token validation error: {e}")
+            raise HTTPException(status_code=500, detail="Auth backend error")
+        if not row:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
         return credentials.credentials
 
@@ -115,6 +124,7 @@ def create_app(engine: CompanyEngine) -> FastAPI:
         github_installation_id: str = Form(None),
         github_collaborator: str = Form(None),
         optional_offices: str = Form(""),
+        token: str = Depends(verify_token),
     ):
         """Onboard a new project and create the virtual company."""
         try:
@@ -156,27 +166,35 @@ def create_app(engine: CompanyEngine) -> FastAPI:
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/api/github/invite")
-    async def github_invite(request: dict):
+    async def github_invite(request: dict, token: str = Depends(verify_token)):
         """Invite a collaborator via GitHub App."""
         try:
             app_id = request.get("app_id")
-            private_key = request.get("private_key")
             installation_id = request.get("installation_id")
             owner = request.get("owner")
             repo = request.get("repo")
             collaborator = request.get("collaborator")
 
-            if not all([app_id, private_key, installation_id, owner, repo, collaborator]):
+            if not all([app_id, installation_id, owner, repo, collaborator]):
                 raise HTTPException(status_code=400, detail="Missing required fields")
 
-            gh_app = GitHubApp(app_id=app_id, private_key=private_key)
-            token = await gh_app.get_installation_token(int(installation_id))
-            result = await gh_app.invite_collaborator(token, owner, repo, collaborator)
+            # Read private key from local file (never from request)
+            key_path = Path(__file__).resolve().parent.parent.parent / ".secrets" / "github-app-private-key.pem"
+            if not key_path.exists():
+                return {"success": False, "error": "GitHub App private key not configured on server"}
+
+            private_key = key_path.read_text()
+
+            gh_app = GitHubApp(app_id=str(app_id), private_key=private_key)
+            inst_token = await gh_app.get_installation_token(int(str(installation_id)))
+            result = await gh_app.invite_collaborator(inst_token, str(owner), str(repo), str(collaborator))
 
             if result["success"]:
                 return {"success": True, "message": f"Invitation sent to {collaborator}"}
             else:
                 return {"success": False, "error": result.get("error", "Unknown error")}
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"GitHub invite failed: {e}")
             return {"success": False, "error": str(e)}
@@ -266,12 +284,25 @@ class WebSocketManager:
         state = await self.engine.get_company_state()
         await websocket.send_json({"type": "state", "data": state})
 
-        # Subscribe to engine events
-        self.engine.event_bus.subscribe("agent_walking", self._create_handler("agent_walking"))
-        self.engine.event_bus.subscribe("agent_arrived", self._create_handler("agent_arrived"))
-        self.engine.event_bus.subscribe("intent_to_communicate", self._create_handler("intent_to_communicate"))
-        self.engine.event_bus.subscribe("agent_fired", self._create_handler("agent_fired"))
-        self.engine.event_bus.subscribe("request_new_agent", self._create_handler("request_new_agent"))
+        # Subscribe to engine events (uses broadcast directly, no per-connection handler)
+        # NOTE: subscription is done once per engine, not per connection, to avoid leaks
+        self._ensure_subscribed()
+
+    def _ensure_subscribed(self):
+        """Subscribe the event bus to the shared broadcast (idempotent)."""
+        if getattr(self, "_subscribed", False):
+            return
+        if not self.engine.event_bus:
+            return
+
+        async def _broadcast_handler(event: str, data: dict):
+            await self.broadcast({"type": event, "data": data})
+
+        for event_type in ("agent_walking", "agent_arrived", "intent_to_communicate",
+                           "agent_fired", "request_new_agent"):
+            self.engine.event_bus.subscribe(event_type, _broadcast_handler)
+
+        self._subscribed = True
 
     def disconnect(self, websocket: WebSocket):
         """Remove a WebSocket connection."""

@@ -42,22 +42,55 @@ class ProjectAnalyzer:
                 "component_count": len(components),
             }
 
+    def _validate_git_url(self, url: str) -> bool:
+        """Validate that a git URL is safe to clone."""
+        # Only allow https://github.com/... URLs
+        allowed_prefixes = ("https://github.com/", "https://gitlab.com/", "https://bitbucket.org/")
+        if not url.startswith(allowed_prefixes):
+            return False
+        # Reject URLs with shell metacharacters or protocol tricks
+        dangerous = [";", "|", "&", "`", "$", "&&", "||", "..", "~", "\n", "\r", "\\", "-o", "ext::", "--upload-pack", "--config"]
+        for pattern in dangerous:
+            if pattern in url:
+                return False
+        # Must look like owner/repo
+        parts = url.split("/")
+        if len(parts) < 5:
+            return False
+        return True
+
+    def _safe_extract_zip(self, zf: zipfile.ZipFile, dest: str) -> None:
+        """Safely extract a zip, preventing path traversal (Zip Slip)."""
+        dest_path = Path(dest).resolve()
+        for member in zf.namelist():
+            # Resolve the target path and ensure it stays inside dest
+            target = (dest_path / member).resolve()
+            if not str(target).startswith(str(dest_path) + "/") and target != dest_path:
+                raise ValueError(f"Unsafe path in zip archive: {member}")
+        zf.extractall(dest)
+
     async def _fetch_project(self, source: str, dest: str) -> Path:
-        """Fetch project from zip or git."""
+        """Fetch project from zip or git URL."""
         if source.endswith(".zip"):
             with zipfile.ZipFile(source, "r") as zf:
-                zf.extractall(dest)
+                self._safe_extract_zip(zf, dest)
             return Path(dest)
         elif source.startswith("http") and ".git" in source:
+            if not self._validate_git_url(source):
+                raise ValueError(f"Invalid or unsafe git URL: {source}")
             subprocess.run(
                 ["git", "clone", "--depth", "1", source, dest],
                 check=True,
                 capture_output=True,
+                timeout=300,  # 5 minute timeout
             )
             return Path(dest)
         else:
             # Assume it's a local path
-            return Path(source)
+            local = Path(source).resolve()
+            if not local.exists():
+                raise ValueError(f"Local path does not exist: {source}")
+            return local
 
     def _scan_files(self, root: Path) -> list[dict]:
         """Scan all relevant source files."""
